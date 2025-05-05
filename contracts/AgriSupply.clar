@@ -265,3 +265,112 @@
     (ok true)
   )
 )
+
+
+
+(define-map product-certifications
+  { product-id: uint, certification-type: (string-ascii 30) }
+  {
+    certifier: principal,
+    certification-date: uint,
+    expiry-date: uint,
+    status: (string-ascii 20),
+    certificate-id: (string-ascii 50)
+  }
+)
+
+(define-map authorized-certifiers 
+  { certifier: principal }
+  { 
+    active: bool,
+    organization: (string-ascii 50)
+  }
+)
+
+(define-public (register-certifier (certifier principal) (organization (string-ascii 50)))
+  (begin
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (map-set authorized-certifiers
+      { certifier: certifier }
+      { active: true, organization: organization }
+    )
+    (ok true)
+  )
+)
+
+(define-public (add-certification 
+    (product-id uint)
+    (certification-type (string-ascii 30))
+    (expiry-date uint)
+    (certificate-id (string-ascii 50)))
+  (let
+    ((certifier-info (unwrap! (map-get? authorized-certifiers { certifier: tx-sender }) err-unauthorized)))
+    (asserts! (get active certifier-info) err-unauthorized)
+    (map-set product-certifications
+      { product-id: product-id, certification-type: certification-type }
+      {
+        certifier: tx-sender,
+        certification-date: stacks-block-height,
+        expiry-date: expiry-date,
+        status: "ACTIVE",
+        certificate-id: certificate-id
+      }
+    )
+    (ok true)
+  )
+)
+
+
+
+(define-map product-ratings
+  { product-id: uint, reviewer: principal }
+  {
+    rating: uint,
+    review: (string-ascii 200),
+    timestamp: uint,
+    reviewer-type: (string-ascii 20)
+  }
+)
+
+(define-map product-rating-stats
+  { product-id: uint }
+  {
+    total-ratings: uint,
+    average-rating: uint,
+    last-updated: uint
+  }
+)
+
+(define-public (add-product-rating 
+    (product-id uint)
+    (rating uint)
+    (review (string-ascii 200))
+    (reviewer-type (string-ascii 20)))
+  (let
+    (
+      (product (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (current-stats (default-to { total-ratings: u0, average-rating: u0, last-updated: u0 }
+        (map-get? product-rating-stats { product-id: product-id })))
+    )
+    (asserts! (<= rating u5) err-invalid-input)
+    (map-set product-ratings
+      { product-id: product-id, reviewer: tx-sender }
+      {
+        rating: rating,
+        review: review,
+        timestamp: stacks-block-height,
+        reviewer-type: reviewer-type
+      }
+    )
+    (map-set product-rating-stats
+      { product-id: product-id }
+      {
+        total-ratings: (+ (get total-ratings current-stats) u1),
+        average-rating: (/ (+ (* (get average-rating current-stats) (get total-ratings current-stats)) rating)
+                          (+ (get total-ratings current-stats) u1)),
+        last-updated: stacks-block-height
+      }
+    )
+    (ok true)
+  )
+)
