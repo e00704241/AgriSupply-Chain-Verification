@@ -374,3 +374,135 @@
     (ok true)
   )
 )
+
+
+
+
+(define-public (batch-add-supply-chain-events (events-data (list 50 {
+  product-id: uint,
+  event-type: (string-ascii 20),
+  location: (string-ascii 100),
+  temperature: int,
+  humidity: int,
+  quality-score: uint,
+  notes: (string-ascii 200)
+})))
+  (let
+    ((results (map batch-add-single-event events-data)))
+    (ok results)
+  )
+)
+
+(define-private (batch-add-single-event (event-data {
+  product-id: uint,
+  event-type: (string-ascii 20),
+  location: (string-ascii 100),
+  temperature: int,
+  humidity: int,
+  quality-score: uint,
+  notes: (string-ascii 200)
+}))
+  (let
+    ((result (add-supply-chain-event
+      (get product-id event-data)
+      (get event-type event-data)
+      (get location event-data)
+      (get temperature event-data)
+      (get humidity event-data)
+      (get quality-score event-data)
+      (get notes event-data))))
+    (match result
+      success { success: true, event-id: success, product-id: (get product-id event-data), error: u0 }
+      error { success: false, event-id: u0, product-id: (get product-id event-data), error: error }
+    )
+  )
+)
+
+(define-public (batch-add-certifications (certifications-data (list 20 {
+  product-id: uint,
+  certification-type: (string-ascii 30),
+  expiry-date: uint,
+  certificate-id: (string-ascii 50)
+})))
+  (let
+    ((results (map batch-add-single-certification certifications-data)))
+    (ok results)
+  )
+)
+
+(define-private (batch-add-single-certification (cert-data {
+  product-id: uint,
+  certification-type: (string-ascii 30),
+  expiry-date: uint,
+  certificate-id: (string-ascii 50)
+}))
+  (let
+    ((result (add-certification
+      (get product-id cert-data)
+      (get certification-type cert-data)
+      (get expiry-date cert-data)
+      (get certificate-id cert-data))))
+    (match result
+      success { success: true, product-id: (get product-id cert-data), error: u0 }
+      error { success: false, product-id: (get product-id cert-data), error: error }
+    )
+  )
+)
+
+(define-public (batch-record-harvests (harvest-data (list 30 {
+  product-id: uint,
+  harvest-date: uint
+})))
+  (let
+    ((results (map batch-record-single-harvest harvest-data)))
+    (ok results)
+  )
+)
+
+(define-private (batch-record-single-harvest (harvest-info {
+  product-id: uint,
+  harvest-date: uint
+}))
+  (let
+    ((result (record-harvest
+      (get product-id harvest-info)
+      (get harvest-date harvest-info))))
+    (match result
+      success { success: true, product-id: (get product-id harvest-info), error: u0 }
+      error { success: false, product-id: (get product-id harvest-info), error: error }
+    )
+  )
+)
+
+(define-public (batch-deactivate-products (product-ids (list 50 uint)))
+  (let
+    ((results (map batch-deactivate-single-product product-ids)))
+    (ok results)
+  )
+)
+
+(define-private (batch-deactivate-single-product (product-id uint))
+  (let
+    ((result (deactivate-product product-id)))
+    (match result
+      success { success: true, product-id: product-id, error: u0 }
+      error { success: false, product-id: product-id, error: error }
+    )
+  )
+)
+
+(define-read-only (batch-get-products (product-ids (list 50 uint)))
+  (map get-product product-ids)
+)
+
+(define-read-only (batch-get-farms (farm-ids (list 50 uint)))
+  (map get-farm farm-ids)
+)
+
+(define-read-only (batch-get-product-ratings (product-ids (list 30 uint)))
+  (map get-product-rating-stats product-ids)
+)
+
+(define-read-only (get-product-rating-stats (product-id uint))
+  (map-get? product-rating-stats { product-id: product-id })
+)
