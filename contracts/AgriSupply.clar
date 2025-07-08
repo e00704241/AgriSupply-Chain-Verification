@@ -506,3 +506,152 @@
 (define-read-only (get-product-rating-stats (product-id uint))
   (map-get? product-rating-stats { product-id: product-id })
 )
+
+(define-map product-ownership
+  { product-id: uint }
+  {
+    current-owner: principal,
+    ownership-type: (string-ascii 20),
+    last-transfer-date: uint
+  }
+)
+
+(define-map ownership-transfers
+  { product-id: uint, transfer-id: uint }
+  {
+    from-owner: principal,
+    to-owner: principal,
+    transfer-date: uint,
+    transfer-type: (string-ascii 20),
+    price: uint,
+    notes: (string-ascii 200),
+    status: (string-ascii 20)
+  }
+)
+
+(define-map product-transfer-count
+  { product-id: uint }
+  { count: uint }
+)
+
+(define-public (initiate-product-transfer
+    (product-id uint)
+    (to-owner principal)
+    (transfer-type (string-ascii 20))
+    (price uint)
+    (notes (string-ascii 200)))
+  (let
+    (
+      (product (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (current-ownership (map-get? product-ownership { product-id: product-id }))
+      (transfer-count (default-to { count: u0 } (map-get? product-transfer-count { product-id: product-id })))
+      (next-transfer-id (get count transfer-count))
+    )
+    (asserts! 
+      (or 
+        (is-eq tx-sender (get farmer product))
+        (match current-ownership
+          some-ownership (is-eq tx-sender (get current-owner some-ownership))
+          false
+        )
+      )
+      err-unauthorized
+    )
+    (asserts! (not (is-eq tx-sender to-owner)) err-invalid-input)
+    
+    (map-set ownership-transfers
+      { product-id: product-id, transfer-id: next-transfer-id }
+      {
+        from-owner: tx-sender,
+        to-owner: to-owner,
+        transfer-date: stacks-block-height,
+        transfer-type: transfer-type,
+        price: price,
+        notes: notes,
+        status: "PENDING"
+      }
+    )
+    
+    (map-set product-transfer-count
+      { product-id: product-id }
+      { count: (+ next-transfer-id u1) }
+    )
+    
+    (ok next-transfer-id)
+  )
+)
+
+(define-public (complete-product-transfer
+    (product-id uint)
+    (transfer-id uint))
+  (let
+    (
+      (transfer (unwrap! (map-get? ownership-transfers { product-id: product-id, transfer-id: transfer-id }) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get to-owner transfer)) err-unauthorized)
+    (asserts! (is-eq (get status transfer) "PENDING") err-invalid-state)
+    
+    (map-set ownership-transfers
+      { product-id: product-id, transfer-id: transfer-id }
+      (merge transfer { status: "COMPLETED" })
+    )
+    
+    (map-set product-ownership
+      { product-id: product-id }
+      {
+        current-owner: (get to-owner transfer),
+        ownership-type: (get transfer-type transfer),
+        last-transfer-date: stacks-block-height
+      }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (cancel-product-transfer
+    (product-id uint)
+    (transfer-id uint))
+  (let
+    (
+      (transfer (unwrap! (map-get? ownership-transfers { product-id: product-id, transfer-id: transfer-id }) err-not-found))
+    )
+    (asserts! (is-eq tx-sender (get from-owner transfer)) err-unauthorized)
+    (asserts! (is-eq (get status transfer) "PENDING") err-invalid-state)
+    
+    (map-set ownership-transfers
+      { product-id: product-id, transfer-id: transfer-id }
+      (merge transfer { status: "CANCELLED" })
+    )
+    
+    (ok true)
+  )
+)
+
+(define-read-only (get-product-ownership (product-id uint))
+  (map-get? product-ownership { product-id: product-id })
+)
+
+(define-read-only (get-ownership-transfer (product-id uint) (transfer-id uint))
+  (map-get? ownership-transfers { product-id: product-id, transfer-id: transfer-id })
+)
+
+(define-read-only (get-product-transfer-count (product-id uint))
+  (default-to { count: u0 } (map-get? product-transfer-count { product-id: product-id }))
+)
+
+(define-read-only (get-current-product-owner (product-id uint))
+  (let
+    (
+      (product (map-get? products { product-id: product-id }))
+      (ownership (map-get? product-ownership { product-id: product-id }))
+    )
+    (match ownership
+      some-ownership (some (get current-owner some-ownership))
+      (match product
+        some-product (some (get farmer some-product))
+        none
+      )
+    )
+  )
+)
