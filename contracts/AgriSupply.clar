@@ -655,3 +655,248 @@
     )
   )
 )
+
+;; Quality Assurance Laboratory Testing System
+;; Data structures for laboratory certification and test management
+
+(define-map certified-laboratories
+  { lab-id: uint }
+  {
+    name: (string-ascii 100),
+    location: (string-ascii 150),
+    operator: principal,
+    accreditation: (string-ascii 50),
+    registration-date: uint,
+    active: bool
+  }
+)
+
+(define-map test-type-definitions
+  { test-type-id: uint }
+  {
+    name: (string-ascii 80),
+    category: (string-ascii 30),
+    unit: (string-ascii 20),
+    min-value: int,
+    max-value: int,
+    lab-id: uint
+  }
+)
+
+(define-map product-test-results
+  { product-id: uint, test-id: uint }
+  {
+    lab-id: uint,
+    test-type-id: uint,
+    result-value: int,
+    result-status: (string-ascii 20),
+    test-date: uint,
+    technician: principal,
+    sample-batch: (string-ascii 50),
+    notes: (string-ascii 300)
+  }
+)
+
+(define-map product-test-count
+  { product-id: uint }
+  { count: uint }
+)
+
+(define-map lab-authorization
+  { operator: principal }
+  { 
+    authorized: bool,
+    lab-id: uint
+  }
+)
+
+(define-data-var next-lab-id uint u1)
+(define-data-var next-test-type-id uint u1)
+
+;; Laboratory registration and management functions
+
+(define-public (register-laboratory 
+    (name (string-ascii 100))
+    (location (string-ascii 150))
+    (accreditation (string-ascii 50)))
+  (let
+    (
+      (lab-id (var-get next-lab-id))
+    )
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    
+    (map-set certified-laboratories
+      { lab-id: lab-id }
+      {
+        name: name,
+        location: location,
+        operator: tx-sender,
+        accreditation: accreditation,
+        registration-date: stacks-block-height,
+        active: true
+      }
+    )
+    
+    (map-set lab-authorization
+      { operator: tx-sender }
+      { authorized: true, lab-id: lab-id }
+    )
+    
+    (var-set next-lab-id (+ lab-id u1))
+    (ok lab-id)
+  )
+)
+
+(define-public (authorize-lab-operator 
+    (operator principal)
+    (lab-id uint))
+  (let
+    (
+      (lab (unwrap! (map-get? certified-laboratories { lab-id: lab-id }) err-not-found))
+    )
+    (asserts! (is-eq tx-sender contract-owner) err-owner-only)
+    (asserts! (get active lab) err-invalid-state)
+    
+    (map-set lab-authorization
+      { operator: operator }
+      { authorized: true, lab-id: lab-id }
+    )
+    
+    (ok true)
+  )
+)
+
+(define-public (define-test-type
+    (name (string-ascii 80))
+    (category (string-ascii 30))
+    (unit (string-ascii 20))
+    (min-value int)
+    (max-value int))
+  (let
+    (
+      (test-type-id (var-get next-test-type-id))
+      (auth (unwrap! (map-get? lab-authorization { operator: tx-sender }) err-unauthorized))
+    )
+    (asserts! (get authorized auth) err-unauthorized)
+    (asserts! (< min-value max-value) err-invalid-input)
+    
+    (map-set test-type-definitions
+      { test-type-id: test-type-id }
+      {
+        name: name,
+        category: category,
+        unit: unit,
+        min-value: min-value,
+        max-value: max-value,
+        lab-id: (get lab-id auth)
+      }
+    )
+    
+    (var-set next-test-type-id (+ test-type-id u1))
+    (ok test-type-id)
+  )
+)
+
+;; Test result recording and validation
+
+(define-public (record-test-result
+    (product-id uint)
+    (test-type-id uint)
+    (result-value int)
+    (sample-batch (string-ascii 50))
+    (notes (string-ascii 300)))
+  (let
+    (
+      (product (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (test-type (unwrap! (map-get? test-type-definitions { test-type-id: test-type-id }) err-not-found))
+      (auth (unwrap! (map-get? lab-authorization { operator: tx-sender }) err-unauthorized))
+      (test-count (default-to { count: u0 } (map-get? product-test-count { product-id: product-id })))
+      (next-test-id (get count test-count))
+      (result-status (if (and (>= result-value (get min-value test-type)) 
+                             (<= result-value (get max-value test-type)))
+                        "PASS"
+                        "FAIL"))
+    )
+    (asserts! (get authorized auth) err-unauthorized)
+    (asserts! (is-eq (get lab-id auth) (get lab-id test-type)) err-unauthorized)
+    
+    (map-set product-test-results
+      { product-id: product-id, test-id: next-test-id }
+      {
+        lab-id: (get lab-id auth),
+        test-type-id: test-type-id,
+        result-value: result-value,
+        result-status: result-status,
+        test-date: stacks-block-height,
+        technician: tx-sender,
+        sample-batch: sample-batch,
+        notes: notes
+      }
+    )
+    
+    (map-set product-test-count
+      { product-id: product-id }
+      { count: (+ next-test-id u1) }
+    )
+    
+    (ok next-test-id)
+  )
+)
+
+(define-public (update-test-result-status
+    (product-id uint)
+    (test-id uint)
+    (new-status (string-ascii 20)))
+  (let
+    (
+      (test-result (unwrap! (map-get? product-test-results { product-id: product-id, test-id: test-id }) err-not-found))
+      (auth (unwrap! (map-get? lab-authorization { operator: tx-sender }) err-unauthorized))
+    )
+    (asserts! (get authorized auth) err-unauthorized)
+    (asserts! (is-eq (get lab-id auth) (get lab-id test-result)) err-unauthorized)
+    
+    (map-set product-test-results
+      { product-id: product-id, test-id: test-id }
+      (merge test-result { result-status: new-status })
+    )
+    
+    (ok true)
+  )
+)
+
+;; Read-only functions for querying test data
+
+(define-read-only (get-laboratory (lab-id uint))
+  (map-get? certified-laboratories { lab-id: lab-id })
+)
+
+(define-read-only (get-test-type-definition (test-type-id uint))
+  (map-get? test-type-definitions { test-type-id: test-type-id })
+)
+
+(define-read-only (get-test-result (product-id uint) (test-id uint))
+  (map-get? product-test-results { product-id: product-id, test-id: test-id })
+)
+
+(define-read-only (get-product-test-count (product-id uint))
+  (default-to { count: u0 } (map-get? product-test-count { product-id: product-id }))
+)
+
+(define-read-only (is-lab-operator-authorized (operator principal))
+  (default-to { authorized: false, lab-id: u0 } (map-get? lab-authorization { operator: operator }))
+)
+
+(define-read-only (get-product-test-summary (product-id uint))
+  (let
+    (
+      (test-count (get-product-test-count product-id))
+    )
+    { 
+      total-tests: (get count test-count),
+      product-exists: (is-some (map-get? products { product-id: product-id }))
+    }
+  )
+)
+
+
+
