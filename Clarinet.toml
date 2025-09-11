@@ -9,6 +9,10 @@ requirements = []
 path = 'contracts/AgriSupply.clar'
 clarity_version = 3
 epoch = 3.1
+[contracts.QualityAuditSystem]
+path = 'contracts/QualityAuditSystem.clar'
+clarity_version = 3
+epoch = 3.1
 [repl.analysis]
 passes = ['check_checker']
 
